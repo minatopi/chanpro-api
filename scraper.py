@@ -4,10 +4,12 @@ import re
 from datetime import datetime, timedelta
 
 URL = "https://chanpro.jp/00-program-profile/1724731678594x659718187856833700"
-
 DATA_FILE = "data.json"
 
 
+# -------------------------
+# parse
+# -------------------------
 def parse_card(text: str):
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
@@ -29,6 +31,9 @@ def parse_card(text: str):
     }
 
 
+# -------------------------
+# scrape
+# -------------------------
 def scrape_posts():
 
     results = []
@@ -41,10 +46,15 @@ def scrape_posts():
         page.goto(URL, wait_until="domcontentloaded")
         page.wait_for_timeout(8000)
 
-        container = page.locator("div.bubble-element.Group.baTcwaH1").first
+        container = page.locator(
+            "div.bubble-element.Group.baTcwaH1"
+        ).first
+
         container.wait_for()
 
-        cards = container.locator("div.clickable-element").all()
+        cards = container.locator(
+            "div.clickable-element"
+        ).all()
 
         for card in cards:
             try:
@@ -59,73 +69,96 @@ def scrape_posts():
     return results
 
 
+# -------------------------
+# load/save
+# -------------------------
 def load_data():
-
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except:
         return {
-            "updated_at": None,
             "current": [],
             "changes": []
         }
 
 
 def save_data(data):
-
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+# -------------------------
+# main logic
+# -------------------------
 def main():
 
     new_posts = scrape_posts()
     old_data = load_data()
 
     old_posts = old_data.get("current", [])
+    old_changes = old_data.get("changes", [])
 
-    # key作成（比較用）
+    now = datetime.now()
+
     def key(p):
         return f"{p['title']}:{p['like']}:{p['views']}"
 
-    old_set = {key(p): p for p in old_posts}
-    new_set = {key(p): p for p in new_posts}
+    old_map = {key(p): p for p in old_posts}
+    new_map = {key(p): p for p in new_posts}
 
     changes = []
 
-    # 新規・変化検出
-    for k, v in new_set.items():
-        if k not in old_set:
+    # -------------------------
+    # 差分検出
+    # -------------------------
+    for k, v in new_map.items():
+        if k not in old_map:
             changes.append({
+                "time": now.isoformat(),
                 "type": "new",
                 "data": v
             })
 
-    for k, v in old_set.items():
-        if k not in new_set:
+    for k, v in old_map.items():
+        if k not in new_map:
             changes.append({
+                "time": now.isoformat(),
                 "type": "removed",
                 "data": v
             })
 
-    # 24時間以上のchanges削除
-    now = datetime.now()
+    # -------------------------
+    # 既存changesを寿命管理
+    # -------------------------
     filtered_changes = []
 
-    for c in old_data.get("changes", []):
-        if "time" in c:
-            t = datetime.fromisoformat(c["time"])
-            if now - t < timedelta(days=1):
-                filtered_changes.append(c)
+    for c in old_changes:
 
-    # 新しいchanges追加
-    for c in changes:
-        c["time"] = now.isoformat()
+        t = datetime.fromisoformat(c["time"])
+        age = now - t
+
+        # 7日以上 → 削除
+        if age > timedelta(days=7):
+            continue
+
+        # それ以外 → 残す
         filtered_changes.append(c)
 
+    # -------------------------
+    # 1日経過したものは old扱いフラグ追加
+    # -------------------------
+    for c in filtered_changes:
+        t = datetime.fromisoformat(c["time"])
+        if now - t > timedelta(days=1):
+            c["type"] = "old"
+
+    # -------------------------
+    # 新しいchanges追加
+    # -------------------------
+    filtered_changes.extend(changes)
+
     result = {
-        "updated_at": now.isoformat(),
         "current": new_posts,
         "changes": filtered_changes
     }
