@@ -1,68 +1,66 @@
 from playwright.sync_api import sync_playwright
 import json
-import re
+import os
 from datetime import datetime, timedelta
 
 URL = "https://chanpro.jp/00-program-profile/1724731678594x659718187856833700"
+
 DATA_FILE = "data.json"
 
 
 # -------------------------
-# parse
+# パース（あなたの既存関数想定）
 # -------------------------
-def parse_card(text: str):
+def parse_card(text):
+    try:
+        lines = text.split("\n")
+        title = lines[0].strip()
 
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+        like = 0
+        views = 0
 
-    skip = ["ログイン", "Lv."]
-    lines = [l for l in lines if not any(s in l for s in skip)]
-    lines = [l for l in lines if l != "みなと"]
+        for l in lines:
+            if "like" in l.lower():
+                like = int("".join(filter(str.isdigit, l)))
+            if "view" in l.lower():
+                views = int("".join(filter(str.isdigit, l)))
 
-    if not lines:
+        return {
+            "title": title,
+            "like": like,
+            "views": views
+        }
+    except:
         return None
 
-    title = lines[0]
-    nums = re.findall(r"\d+", text)
-
-    return {
-        "title": title,
-        "like": int(nums[0]) if len(nums) > 0 else 0,
-        "views": int(nums[1]) if len(nums) > 1 else 0
-    }
-
 
 # -------------------------
-# scrape
+# スクレイプ（重要：コンテナ限定）
 # -------------------------
 def scrape_posts():
-
     results = []
 
     with sync_playwright() as p:
-
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
 
-        page.goto(URL, wait_until="domcontentloaded")
-        page.wait_for_timeout(8000)
+        page.goto(URL, wait_until="networkidle")
+        page.wait_for_timeout(5000)
 
-        container = page.locator(
-            "div.bubble-element.Group.baTcwaH1"
-        ).first
+        container = page.locator("div.bubble-element.Group.baTcwaH1")
 
-        container.wait_for()
-
-        cards = container.locator(
-            "div.clickable-element"
-        ).all()
+        cards = container.locator("div.clickable-element").all()
 
         for card in cards:
             try:
-                item = parse_card(card.inner_text())
-                if item:
-                    results.append(item)
-            except:
-                pass
+                text = card.inner_text()
+                parsed = parse_card(text)
+
+                if parsed:
+                    results.append(parsed)
+
+            except Exception as e:
+                print("error:", e)
 
         browser.close()
 
@@ -70,106 +68,97 @@ def scrape_posts():
 
 
 # -------------------------
-# load/save
+# データ読み込み
 # -------------------------
 def load_data():
-    try:
+    if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    except:
-        return {
-            "current": [],
-            "changes": []
-        }
 
-
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    return {
+        "current": [],
+        "changes": []
+    }
 
 
 # -------------------------
-# main
+# 差分計算（ここが修正ポイント）
 # -------------------------
-def main():
-
-    new_posts = scrape_posts()
-    old_data = load_data()
-
-    old_posts = old_data.get("current", [])
-    old_changes = old_data.get("changes", [])
-
-    now = datetime.now()
-
-    # -------------------------
-    # key = title固定
-    # -------------------------
-    def key(p):
-        return p["title"].strip()
-
-    old_map = {key(p): p for p in old_posts}
-    new_map = {key(p): p for p in new_posts}
+def make_diff(old_list, new_list):
+    old_map = {
+        (x["title"]): x for x in old_list
+    }
 
     changes = []
 
-    # -------------------------
-    # new / updated
-    # -------------------------
-    for k, new_p in new_map.items():
+    for n in new_list:
+        title = n["title"]
+        old = old_map.get(title)
 
-        if k not in old_map:
+        # 初回は new にしない（全部入るバグ防止）
+        if not old:
+            continue
+
+        # like / views が変わったものだけ
+        if old["like"] != n["like"] or old["views"] != n["views"]:
             changes.append({
-                "time": now.isoformat(),
-                "type": "new",
-                "data": new_p
+                "type": "update",
+                "data": n,
+                "time": datetime.now().isoformat()
             })
 
-        else:
-            old_p = old_map[k]
+    return changes
 
-            # ★ like or views が変わったら差分
-            if old_p["like"] != new_p["like"] or old_p["views"] != new_p["views"]:
-                changes.append({
-                    "time": now.isoformat(),
-                    "type": "updated",
-                    "before": old_p,
-                    "after": new_p
-                })
 
-    # -------------------------
-    # removed
-    # -------------------------
-    for k, old_p in old_map.items():
-        if k not in new_map:
-            changes.append({
-                "time": now.isoformat(),
-                "type": "removed",
-                "data": old_p
-            })
+# -------------------------
+# 期限管理
+# -------------------------
+def cleanup_changes(changes):
+    now = datetime.now()
+    result = []
 
-    # -------------------------
-    # 1週間ログだけ保持
-    # -------------------------
-    filtered_changes = []
-
-    for c in old_changes:
-
+    for c in changes:
         t = datetime.fromisoformat(c["time"])
 
-        if now - t <= timedelta(days=7):
-            filtered_changes.append(c)
+        # 1週間以上削除
+        if now - t > timedelta(days=7):
+            continue
 
-    filtered_changes.extend(changes)
+        # 1日以上 → oldにする
+        if now - t > timedelta(days=1):
+            c["type"] = "old"
 
-    result = {
-        "current": new_posts,
-        "changes": filtered_changes
-    }
+        result.append(c)
 
-    save_data(result)
+    return result
 
-    print("current:", len(new_posts))
-    print("changes:", len(filtered_changes))
+
+# -------------------------
+# メイン
+# -------------------------
+def main():
+    old_data = load_data()
+    old_current = old_data["current"]
+
+    new_current = scrape_posts()
+
+    changes = make_diff(old_current, new_current)
+
+    # current更新
+    old_data["current"] = new_current
+
+    # changes追加
+    old_data["changes"].extend(changes)
+
+    # 期限処理
+    old_data["changes"] = cleanup_changes(old_data["changes"])
+
+    # 保存
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(old_data, f, ensure_ascii=False, indent=2)
+
+    print("SCRAPED:", len(new_current))
+    print("CHANGES:", len(changes))
 
 
 if __name__ == "__main__":
