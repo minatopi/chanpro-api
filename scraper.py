@@ -4,12 +4,11 @@ import os
 from datetime import datetime, timedelta
 
 URL = "https://chanpro.jp/00-program-profile/1724731678594x659718187856833700"
-
 DATA_FILE = "data.json"
 
 
 # -------------------------
-# パース（あなたの既存関数想定）
+# 安定パース
 # -------------------------
 def parse_card(text):
     try:
@@ -20,9 +19,11 @@ def parse_card(text):
         views = 0
 
         for l in lines:
-            if "like" in l.lower():
+            l_lower = l.lower()
+
+            if "like" in l_lower:
                 like = int("".join(filter(str.isdigit, l)))
-            if "view" in l.lower():
+            if "view" in l_lower:
                 views = int("".join(filter(str.isdigit, l)))
 
         return {
@@ -35,7 +36,14 @@ def parse_card(text):
 
 
 # -------------------------
-# スクレイプ（重要：コンテナ限定）
+# キー正規化（超重要）
+# -------------------------
+def make_key(item):
+    return item["title"].strip().replace(" ", "").replace("　", "")
+
+
+# -------------------------
+# スクレイプ（container固定）
 # -------------------------
 def scrape_posts():
     results = []
@@ -48,7 +56,6 @@ def scrape_posts():
         page.wait_for_timeout(5000)
 
         container = page.locator("div.bubble-element.Group.baTcwaH1")
-
         cards = container.locator("div.clickable-element").all()
 
         for card in cards:
@@ -68,38 +75,43 @@ def scrape_posts():
 
 
 # -------------------------
-# データ読み込み
+# データ読み込み（壊れ対策）
 # -------------------------
 def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+    if not os.path.exists(DATA_FILE):
+        return {"current": [], "changes": []}
 
-    return {
-        "current": [],
-        "changes": []
-    }
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if "current" not in data:
+            data["current"] = []
+        if "changes" not in data:
+            data["changes"] = []
+
+        return data
+
+    except:
+        return {"current": [], "changes": []}
 
 
 # -------------------------
-# 差分計算（ここが修正ポイント）
+# 差分計算（ここが本体）
 # -------------------------
 def make_diff(old_list, new_list):
-    old_map = {
-        (x["title"]): x for x in old_list
-    }
+    old_map = {make_key(x): x for x in old_list}
 
     changes = []
 
     for n in new_list:
-        title = n["title"]
-        old = old_map.get(title)
+        key = make_key(n)
+        old = old_map.get(key)
 
-        # 初回は new にしない（全部入るバグ防止）
+        # 初回はスキップ（全部newになるバグ防止）
         if not old:
             continue
 
-        # like / views が変わったものだけ
         if old["like"] != n["like"] or old["views"] != n["views"]:
             changes.append({
                 "type": "update",
@@ -111,7 +123,7 @@ def make_diff(old_list, new_list):
 
 
 # -------------------------
-# 期限管理
+# old / delete 管理
 # -------------------------
 def cleanup_changes(changes):
     now = datetime.now()
@@ -120,11 +132,11 @@ def cleanup_changes(changes):
     for c in changes:
         t = datetime.fromisoformat(c["time"])
 
-        # 1週間以上削除
+        # 7日以上削除
         if now - t > timedelta(days=7):
             continue
 
-        # 1日以上 → oldにする
+        # 1日以上 old化
         if now - t > timedelta(days=1):
             c["type"] = "old"
 
@@ -134,30 +146,32 @@ def cleanup_changes(changes):
 
 
 # -------------------------
-# メイン
+# メイン処理
 # -------------------------
 def main():
-    old_data = load_data()
-    old_current = old_data["current"]
+    data = load_data()
 
+    old_current = data["current"]
     new_current = scrape_posts()
+
+    print("OLD:", len(old_current))
+    print("NEW:", len(new_current))
 
     changes = make_diff(old_current, new_current)
 
     # current更新
-    old_data["current"] = new_current
+    data["current"] = new_current
 
     # changes追加
-    old_data["changes"].extend(changes)
+    data["changes"].extend(changes)
 
-    # 期限処理
-    old_data["changes"] = cleanup_changes(old_data["changes"])
+    # 期限整理
+    data["changes"] = cleanup_changes(data["changes"])
 
     # 保存
     with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(old_data, f, ensure_ascii=False, indent=2)
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-    print("SCRAPED:", len(new_current))
     print("CHANGES:", len(changes))
 
 
