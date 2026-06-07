@@ -1,7 +1,6 @@
 from playwright.sync_api import sync_playwright
 import json
 import re
-import os
 
 URL = "https://chanpro.jp/00-program-profile/1724731678594x659718187856833700"
 
@@ -10,6 +9,7 @@ def parse_card(text: str):
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
 
+    # ノイズ除去
     skip = ["ログイン", "Lv."]
     lines = [l for l in lines if not any(s in l for s in skip)]
     lines = [l for l in lines if l != "みなと"]
@@ -42,15 +42,17 @@ def scrape_posts():
 
         page.goto(URL, wait_until="domcontentloaded")
 
-        # 🔥 重要：描画待ち
-        page.wait_for_timeout(12000)
+        # しっかり描画待ち
+        page.wait_for_timeout(8000)
 
-        page.wait_for_selector(
-            "div.clickable-element",
-            timeout=30000
-        )
+        # ✅ ここが重要（対象エリア限定）
+        container = page.locator(
+            "div.bubble-element.Group.baTcwaH1"
+        ).first
 
-        cards = page.locator(
+        container.wait_for()
+
+        cards = container.locator(
             "div.clickable-element"
         ).all()
 
@@ -59,10 +61,12 @@ def scrape_posts():
         for card in cards:
 
             try:
-                item = parse_card(card.inner_text())
+                text = card.inner_text()
 
-                if item:
-                    results.append(item)
+                parsed = parse_card(text)
+
+                if parsed:
+                    results.append(parsed)
 
             except Exception as e:
                 print("error:", e)
@@ -74,19 +78,19 @@ def scrape_posts():
 
 if __name__ == "__main__":
 
-    data = {
-        "count": 0,
-        "posts": []
-    }
-
     posts = scrape_posts()
 
-    data["count"] = len(posts)
-    data["posts"] = posts
+    data = {
+        "count": len(posts),
+        "posts": posts
+    }
 
     print("SCRAPED COUNT:", len(posts))
 
-    os.makedirs(".", exist_ok=True)
-
     with open("data.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump(
+            data,
+            f,
+            ensure_ascii=False,
+            indent=2
+        )
