@@ -33,21 +33,39 @@ def scrape_posts():
     results = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+
+        browser = p.chromium.launch(
+            headless=True
+        )
+
         page = browser.new_page()
 
-        page.goto(URL, wait_until="networkidle")
-        page.wait_for_timeout(5000)
+        page.goto(URL, wait_until="domcontentloaded")
 
-        cards = page.locator("div.clickable-element").all()
+        # 🔥 重要：描画待ち
+        page.wait_for_timeout(12000)
+
+        page.wait_for_selector(
+            "div.clickable-element",
+            timeout=30000
+        )
+
+        cards = page.locator(
+            "div.clickable-element"
+        ).all()
+
+        print("cards:", len(cards))
 
         for card in cards:
+
             try:
                 item = parse_card(card.inner_text())
+
                 if item:
                     results.append(item)
-            except:
-                pass
+
+            except Exception as e:
+                print("error:", e)
 
         browser.close()
 
@@ -57,11 +75,17 @@ def scrape_posts():
 if __name__ == "__main__":
 
     data = {
-        "count": len(scrape_posts()),
-        "posts": scrape_posts()
+        "count": 0,
+        "posts": []
     }
 
-    # 念のため
+    posts = scrape_posts()
+
+    data["count"] = len(posts)
+    data["posts"] = posts
+
+    print("SCRAPED COUNT:", len(posts))
+
     os.makedirs(".", exist_ok=True)
 
     with open("data.json", "w", encoding="utf-8") as f:
