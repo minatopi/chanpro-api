@@ -1,0 +1,76 @@
+from playwright.sync_api import sync_playwright
+import json
+import re
+
+URL = "https://chanpro.jp/00-program-profile/1724731678594x659718187856833700"
+
+
+def parse_card(text):
+
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+    skip = ["ログイン", "Lv."]
+    lines = [l for l in lines if not any(s in l for s in skip)]
+    lines = [l for l in lines if l != "みなと"]
+
+    if not lines:
+        return None
+
+    title = lines[0]
+
+    nums = re.findall(r"\d+", text)
+
+    return {
+        "title": title,
+        "like": int(nums[0]) if len(nums) > 0 else 0,
+        "views": int(nums[1]) if len(nums) > 1 else 0
+    }
+
+
+def scrape_posts():
+
+    results = []
+
+    with sync_playwright() as p:
+
+        browser = p.chromium.launch(headless=True)
+
+        page = browser.new_page()
+
+        page.goto(URL, wait_until="networkidle")
+        page.wait_for_timeout(5000)
+
+        cards = page.locator(
+            "div.bubble-element.Group.baTcwaH1 div.clickable-element"
+        ).all()
+
+        for card in cards:
+
+            try:
+                item = parse_card(card.inner_text())
+
+                if item:
+                    results.append(item)
+
+            except Exception:
+                pass
+
+        browser.close()
+
+    return results
+
+
+if __name__ == "__main__":
+
+    data = {
+        "count": len(scrape_posts()),
+        "posts": scrape_posts()
+    }
+
+    with open("docs/data.json", "w", encoding="utf-8") as f:
+        json.dump(
+            data,
+            f,
+            ensure_ascii=False,
+            indent=2
+        )
