@@ -1,3 +1,33 @@
+from playwright.sync_api import sync_playwright
+import json
+import re
+
+URL = "https://chanpro.jp/00-program-profile/1724731678594x659718187856833700"
+
+
+def parse_card(text: str):
+
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+    # ノイズ除去
+    skip = ["ログイン", "Lv."]
+    lines = [l for l in lines if not any(s in l for s in skip)]
+    lines = [l for l in lines if l != "みなと"]
+
+    if not lines:
+        return None
+
+    title = lines[0]
+
+    nums = re.findall(r"\d+", text)
+
+    return {
+        "title": title,
+        "like": int(nums[0]) if len(nums) > 0 else 0,
+        "views": int(nums[1]) if len(nums) > 1 else 0
+    }
+
+
 def scrape_posts():
 
     results = []
@@ -42,3 +72,22 @@ def scrape_posts():
         browser.close()
 
     return results
+
+if __name__ == "__main__":
+
+    posts = scrape_posts()
+
+    data = {
+        "count": len(posts),
+        "posts": posts
+    }
+
+    print("SCRAPED COUNT:", len(posts))
+
+    with open("data.json", "w", encoding="utf-8") as f:
+        json.dump(
+            data,
+            f,
+            ensure_ascii=False,
+            indent=2
+        )
