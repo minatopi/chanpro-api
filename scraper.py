@@ -89,7 +89,7 @@ def save_data(data):
 
 
 # -------------------------
-# main logic
+# main
 # -------------------------
 def main():
 
@@ -101,8 +101,11 @@ def main():
 
     now = datetime.now()
 
+    # -------------------------
+    # key = title固定
+    # -------------------------
     def key(p):
-        return f"{p['title']}:{p['like']}:{p['views']}"
+        return p["title"].strip()
 
     old_map = {key(p): p for p in old_posts}
     new_map = {key(p): p for p in new_posts}
@@ -110,52 +113,52 @@ def main():
     changes = []
 
     # -------------------------
-    # 差分検出
+    # new / updated
     # -------------------------
-    for k, v in new_map.items():
+    for k, new_p in new_map.items():
+
         if k not in old_map:
             changes.append({
                 "time": now.isoformat(),
                 "type": "new",
-                "data": v
+                "data": new_p
             })
 
-    for k, v in old_map.items():
+        else:
+            old_p = old_map[k]
+
+            # ★ like or views が変わったら差分
+            if old_p["like"] != new_p["like"] or old_p["views"] != new_p["views"]:
+                changes.append({
+                    "time": now.isoformat(),
+                    "type": "updated",
+                    "before": old_p,
+                    "after": new_p
+                })
+
+    # -------------------------
+    # removed
+    # -------------------------
+    for k, old_p in old_map.items():
         if k not in new_map:
             changes.append({
                 "time": now.isoformat(),
                 "type": "removed",
-                "data": v
+                "data": old_p
             })
 
     # -------------------------
-    # 既存changesを寿命管理
+    # 1週間ログだけ保持
     # -------------------------
     filtered_changes = []
 
     for c in old_changes:
 
         t = datetime.fromisoformat(c["time"])
-        age = now - t
 
-        # 7日以上 → 削除
-        if age > timedelta(days=7):
-            continue
+        if now - t <= timedelta(days=7):
+            filtered_changes.append(c)
 
-        # それ以外 → 残す
-        filtered_changes.append(c)
-
-    # -------------------------
-    # 1日経過したものは old扱いフラグ追加
-    # -------------------------
-    for c in filtered_changes:
-        t = datetime.fromisoformat(c["time"])
-        if now - t > timedelta(days=1):
-            c["type"] = "old"
-
-    # -------------------------
-    # 新しいchanges追加
-    # -------------------------
     filtered_changes.extend(changes)
 
     result = {
