@@ -3,7 +3,7 @@ name: Scrape ChanPro
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/6 * * * *'
+    - cron: '*/30 * * * *'
 
 permissions:
   contents: write
@@ -41,6 +41,6 @@ jobs:
           git add data.json
 
           git diff --staged --quiet || (
-            git commit -m "update data.json"
+            git commit -m "update data.json (30min interval)"
             git push
           )
