@@ -1,4 +1,5 @@
 from playwright.sync_api import sync_playwright
+from datetime import datetime, timezone
 import json
 import re
 
@@ -9,7 +10,6 @@ def parse_card(text: str):
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
 
-    # ノイズ除去
     skip = ["ログイン", "Lv."]
     lines = [l for l in lines if not any(s in l for s in skip)]
     lines = [l for l in lines if l != "みなと"]
@@ -38,18 +38,14 @@ def scrape_posts():
         page = browser.new_page()
 
         page.goto(URL, wait_until="domcontentloaded")
-
-        # 安定化（重要）
         page.wait_for_timeout(8000)
 
-        # ✅ 対象エリアに限定
         container = page.locator(
             "div.bubble-element.Group.baTcwaH1"
         ).first
 
         container.wait_for()
 
-        # ✅ その中だけ取得
         cards = container.locator(
             "div.clickable-element"
         ).all()
@@ -57,10 +53,8 @@ def scrape_posts():
         print("cards:", len(cards))
 
         for card in cards:
-
             try:
                 text = card.inner_text()
-
                 parsed = parse_card(text)
 
                 if parsed:
@@ -73,16 +67,19 @@ def scrape_posts():
 
     return results
 
+
 if __name__ == "__main__":
 
     posts = scrape_posts()
 
     data = {
+        "last_updated": datetime.now(timezone.utc).isoformat(),
         "count": len(posts),
         "posts": posts
     }
 
     print("SCRAPED COUNT:", len(posts))
+    print("UPDATED:", data["last_updated"])
 
     with open("data.json", "w", encoding="utf-8") as f:
         json.dump(
