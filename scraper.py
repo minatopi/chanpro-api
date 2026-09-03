@@ -1,366 +1,114 @@
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
 from datetime import datetime, timezone
 import json
 import re
-import time
-
-
-# ============================================================
-# 設定
-# ============================================================
 
 URL = "https://chanpro.jp/00-program-profile/1724731678594x659718187856833700"
 
-OUTPUT_FILE = "data.json"
 
-# ページ読み込み後の待機時間（ミリ秒）
-WAIT_AFTER_LOAD = 8000
+def parse_card(text: str):
 
-# カードを取得するセレクタ
-CARD_SELECTOR = "div.clickable-element"
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
 
-# カードを入れる親コンテナ
-CONTAINER_SELECTOR = "div.bubble-element.Group.baTcwaH1"
+    # 不要な文字だけ除外
+    lines = [
+        l for l in lines
+        if l not in ["ログイン"]
+        and not l.startswith("Lv.")
+    ]
 
-
-# ============================================================
-# ユーティリティ
-# ============================================================
-
-def clean_text(text):
-    """
-    余計な空白・改行を削除
-    """
-    if not text:
-        return ""
-
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def extract_like(text):
-    """
-    「19こ」「100こ」などから数字を取得
-    """
-    if not text:
-        return 0
-
-    match = re.search(r"(\d+)\s*こ", text)
-
-    if match:
-        return int(match.group(1))
-
-    return 0
-
-
-def extract_progress(text):
-    """
-    「275/1000」などから現在値を取得
-
-    戻り値:
-        current, total
-
-    例:
-        275/1000
-        -> (275, 1000)
-    """
-
-    if not text:
-        return 0, 0
-
-    match = re.search(r"(\d+)\s*/\s*(\d+)", text)
-
-    if match:
-        current = int(match.group(1))
-        total = int(match.group(2))
-
-        return current, total
-
-    return 0, 0
-
-
-# ============================================================
-# カード解析
-# ============================================================
-
-def parse_card(card):
-    """
-    1つのカードから
-
-        title
-        like
-        views
-
-    を取得する。
-    """
-
-    try:
-
-        # ----------------------------------------------------
-        # カード内のText要素を取得
-        # ----------------------------------------------------
-
-        text_elements = card.locator(
-            "div.bubble-element.Text"
-        ).all_inner_texts()
-
-        # 空文字削除・整形
-        texts = []
-
-        for text in text_elements:
-
-            text = clean_text(text)
-
-            if text:
-                texts.append(text)
-
-        if not texts:
-            return None
-
-
-        # ----------------------------------------------------
-        # カード全体のテキスト
-        # ----------------------------------------------------
-
-        full_text = "\n".join(texts)
-
-
-        # ----------------------------------------------------
-        # 名前
-        # ----------------------------------------------------
-        #
-        # 今回の構造では最初のTextが名前。
-        #
-        # 「みなと」などの固定値には依存しない。
-        #
-
-        title = texts[0]
-
-
-        # ----------------------------------------------------
-        # いいね数
-        # ----------------------------------------------------
-
-        like = 0
-
-        for text in texts:
-
-            value = extract_like(text)
-
-            if value:
-                like = value
-                break
-
-
-        # ----------------------------------------------------
-        # 進捗
-        # ----------------------------------------------------
-
-        views = 0
-        total = 0
-
-        for text in texts:
-
-            current, max_value = extract_progress(text)
-
-            if current or max_value:
-
-                views = current
-                total = max_value
-
-                break
-
-
-        # ----------------------------------------------------
-        # 結果
-        # ----------------------------------------------------
-
-        return {
-            "title": title,
-            "like": like,
-            "views": views,
-            "total": total
-        }
-
-
-    except Exception as e:
-
-        print("カード解析エラー:", e)
-
+    if not lines:
         return None
 
+    # 最初の文字列をタイトルとして扱う
+    title = lines[0]
 
-# ============================================================
-# スクレイピング
-# ============================================================
+    # 数字を取得
+    nums = re.findall(r"\d+", text)
+
+    return {
+        "title": title,
+        "like": int(nums[0]) if len(nums) >= 1 else 0,
+        "views": int(nums[1]) if len(nums) >= 2 else 0
+    }
+
 
 def scrape_posts():
 
     results = []
 
-
     with sync_playwright() as p:
 
-        print("ブラウザ起動中...")
-
-        browser = p.chromium.launch(
-            headless=True
-        )
-
+        browser = p.chromium.launch(headless=True)
 
         page = browser.new_page()
 
-
-        # ----------------------------------------------------
-        # ページアクセス
-        # ----------------------------------------------------
-
         print("ページを開いています...")
 
-        try:
-
-            page.goto(
-                URL,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
-
-        except PlaywrightTimeoutError:
-
-            print("ページ読み込みがタイムアウトしました。")
-
-
-        # ----------------------------------------------------
-        # Bubbleの描画待ち
-        # ----------------------------------------------------
-
-        print(
-            f"{WAIT_AFTER_LOAD / 1000:.1f}秒待機中..."
+        page.goto(
+            URL,
+            wait_until="domcontentloaded",
+            timeout=60000
         )
 
-        page.wait_for_timeout(
-            WAIT_AFTER_LOAD
-        )
+        page.wait_for_timeout(8000)
 
+        # プロフィール内のカードを探す
+        container = page.locator(
+            "div.bubble-element.Group.baTcwaH1"
+        ).first
 
-        # ----------------------------------------------------
-        # コンテナ取得
-        # ----------------------------------------------------
-
-        print("カードコンテナを探しています...")
-
-        try:
-
-            container = page.locator(
-                CONTAINER_SELECTOR
-            ).first
-
-            container.wait_for(
-                state="visible",
-                timeout=30000
-            )
-
-        except PlaywrightTimeoutError:
-
-            print(
-                "カードコンテナが見つかりませんでした。"
-            )
-
-            browser.close()
-
-            return results
-
-
-        # ----------------------------------------------------
-        # カード取得
-        # ----------------------------------------------------
+        container.wait_for()
 
         cards = container.locator(
-            CARD_SELECTOR
-        )
+            "div.clickable-element"
+        ).all()
 
-        card_count = cards.count()
+        print("cards:", len(cards))
 
-        print(
-            f"カード数: {card_count}"
-        )
-
-
-        # ----------------------------------------------------
-        # 各カードを解析
-        # ----------------------------------------------------
-
-        for i in range(card_count):
+        for i, card in enumerate(cards):
 
             try:
 
-                card = cards.nth(i)
+                text = card.inner_text()
 
-                parsed = parse_card(card)
+                print(f"\n--- CARD {i + 1} ---")
+                print(text)
 
+                parsed = parse_card(text)
 
                 if parsed:
-
-                    results.append(
-                        parsed
-                    )
-
-                    print(
-                        f"[{i + 1}/{card_count}] "
-                        f"{parsed['title']} "
-                        f"like={parsed['like']} "
-                        f"views={parsed['views']}/"
-                        f"{parsed['total']}"
-                    )
-
-                else:
-
-                    print(
-                        f"[{i + 1}/{card_count}] "
-                        "解析できませんでした"
-                    )
-
+                    results.append(parsed)
 
             except Exception as e:
 
                 print(
-                    f"[{i + 1}/{card_count}] "
-                    f"エラー: {e}"
+                    f"CARD {i + 1} error:",
+                    e
                 )
 
-
-        # ----------------------------------------------------
-        # ブラウザ終了
-        # ----------------------------------------------------
-
         browser.close()
-
 
     return results
 
 
-# ============================================================
-# JSON保存
-# ============================================================
+if __name__ == "__main__":
 
-def save_json(posts):
+    posts = scrape_posts()
 
     data = {
-
-        "last_updated":
-            datetime.now(
-                timezone.utc
-            ).isoformat(),
-
-        "count":
-            len(posts),
-
-        "posts":
-            posts
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+        "count": len(posts),
+        "posts": posts
     }
 
+    print("\n====================")
+    print("SCRAPED COUNT:", len(posts))
+    print("UPDATED:", data["last_updated"])
+    print("====================")
 
     with open(
-        OUTPUT_FILE,
+        "data.json",
         "w",
         encoding="utf-8"
     ) as f:
@@ -372,66 +120,4 @@ def save_json(posts):
             indent=2
         )
 
-
-    return data
-
-
-# ============================================================
-# メイン
-# ============================================================
-
-if __name__ == "__main__":
-
-    print("=" * 60)
-    print("スクレイピング開始")
-    print("=" * 60)
-
-
-    start_time = time.time()
-
-
-    # --------------------------------------------------------
-    # スクレイピング
-    # --------------------------------------------------------
-
-    posts = scrape_posts()
-
-
-    # --------------------------------------------------------
-    # JSON保存
-    # --------------------------------------------------------
-
-    data = save_json(
-        posts
-    )
-
-
-    elapsed = time.time() - start_time
-
-
-    # --------------------------------------------------------
-    # 結果表示
-    # --------------------------------------------------------
-
-    print()
-    print("=" * 60)
-    print("スクレイピング完了")
-    print("=" * 60)
-
-    print(
-        f"取得件数: {data['count']}"
-    )
-
-    print(
-        f"更新日時: {data['last_updated']}"
-    )
-
-    print(
-        f"処理時間: {elapsed:.2f}秒"
-    )
-
-    print(
-        f"保存先: {OUTPUT_FILE}"
-    )
-
-    print("=" * 60)
+    print("data.json を保存しました")
