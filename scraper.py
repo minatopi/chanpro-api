@@ -1,5 +1,6 @@
 import json
 import re
+import os
 from datetime import datetime, timezone
 
 from playwright.sync_api import sync_playwright
@@ -34,7 +35,7 @@ def now_iso():
 
 def parse_number(text):
     """
-    文字列から数字を取得する。
+    文字列から数字だけを取得する。
 
     例:
         "1,234" -> 1234
@@ -52,6 +53,7 @@ def parse_number(text):
 
     try:
         return int(text)
+
     except ValueError:
         return None
 
@@ -61,41 +63,6 @@ def parse_number(text):
 # ============================================================
 
 def parse_card(card):
-    """
-    プロフィールページ内の1作品カードを解析する。
-
-    重要:
-    カード全体に対して \d+ を実行しない。
-
-    例えば、
-
-        タイトル123
-        Lv.10
-        100
-        500
-
-    のようなカードの場合、
-
-        タイトル123 → タイトル
-        Lv.10      → 除外
-        100        → いいね
-        500        → 閲覧数
-
-    として処理する。
-
-    また、いいねが0の場合に表示されないケース:
-
-        タイトル
-        Lv.10
-        500
-
-    なら、
-
-        likes = 0
-        views = 500
-
-    とする。
-    """
 
     try:
         text = card.inner_text()
@@ -140,7 +107,7 @@ def parse_card(card):
         if re.fullmatch(r"Lv\.\s*\d+", line):
             continue
 
-        # 元コードで不要だった文字
+        # 不要文字
         if line == "みなと":
             continue
 
@@ -156,7 +123,7 @@ def parse_card(card):
     title = cleaned_lines[0]
 
     # --------------------------------------------------------
-    # 数字だけの行を取得
+    # 数字だけの行
     # --------------------------------------------------------
 
     numbers = []
@@ -174,23 +141,26 @@ def parse_card(card):
 
     if len(numbers) >= 2:
 
-        likes = numbers[0]
+        like = numbers[0]
         views = numbers[1]
 
     elif len(numbers) == 1:
 
-        # いいねが0の場合、いいね側の数字が表示されない
-        likes = 0
+        # いいね0の場合、いいねの数字が表示されない
+        like = 0
         views = numbers[0]
 
     else:
 
-        likes = 0
+        like = 0
         views = 0
 
     return {
         "title": title,
-        "likes": likes,
+
+        # ★ LINE通知側に合わせて like
+        "like": like,
+
         "views": views
     }
 
@@ -200,11 +170,6 @@ def parse_card(card):
 # ============================================================
 
 def get_card_url(card):
-    """
-    カード内のaタグから作品URLを取得する。
-
-    URLが見つからない場合はNone。
-    """
 
     try:
 
@@ -248,9 +213,6 @@ def get_card_url(card):
 # ============================================================
 
 def scrape_profile(profile_url):
-    """
-    ChanProプロフィールページから作品一覧を取得する。
-    """
 
     results = []
 
@@ -337,12 +299,11 @@ def scrape_profile(profile_url):
         print("=" * 70)
 
         # ----------------------------------------------------
-        # 各カード処理
+        # 各カード
         # ----------------------------------------------------
 
         for index in range(card_count):
 
-            print()
             print()
             print("#" * 70)
             print(
@@ -361,11 +322,7 @@ def scrape_profile(profile_url):
                 parsed = parse_card(card)
 
                 if not parsed:
-
-                    print(
-                        "解析できなかったためスキップ"
-                    )
-
+                    print("解析できなかったためスキップ")
                     continue
 
                 # ------------------------------------------------
@@ -378,13 +335,11 @@ def scrape_profile(profile_url):
 
                 # ------------------------------------------------
                 # 識別キー
-                #
-                # URLが取れればURL。
-                # URLがなければタイトル。
                 # ------------------------------------------------
 
                 if url:
                     parsed["key"] = url
+
                 else:
                     parsed["key"] = parsed["title"]
 
@@ -400,7 +355,7 @@ def scrape_profile(profile_url):
                     f"タイトル : {parsed['title']}"
                 )
                 print(
-                    f"いいね   : {parsed['likes']}"
+                    f"いいね   : {parsed['like']}"
                 )
                 print(
                     f"閲覧数   : {parsed['views']}"
@@ -432,9 +387,6 @@ def scrape_profile(profile_url):
 # ============================================================
 
 def save_json(posts):
-    """
-    取得結果をdata.jsonに保存する。
-    """
 
     data = {
         "last_updated": now_iso(),
@@ -442,8 +394,6 @@ def save_json(posts):
         "posts": posts
     }
 
-    # 一時ファイルに保存してから置換
-    # 途中で停止してJSONが壊れるのを防ぐ。
     temp_file = OUTPUT_FILE + ".tmp"
 
     with open(
@@ -458,8 +408,6 @@ def save_json(posts):
             ensure_ascii=False,
             indent=2
         )
-
-    import os
 
     os.replace(
         temp_file,
@@ -537,7 +485,7 @@ def main():
         print(
             f"{index}. "
             f"{post['title']} "
-            f"/ いいね={post['likes']} "
+            f"/ いいね={post['like']} "
             f"/ 閲覧={post['views']}"
         )
 
