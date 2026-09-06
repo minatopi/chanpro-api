@@ -10,26 +10,21 @@ def parse_card(text: str):
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
 
-    # 不要な文字だけ除外
-    lines = [
-        l for l in lines
-        if l not in ["ログイン"]
-        and not l.startswith("Lv.")
-    ]
+    skip = ["ログイン", "Lv."]
+    lines = [l for l in lines if not any(s in l for s in skip)]
+    lines = [l for l in lines if l != "みなと"]
 
     if not lines:
         return None
 
-    # 最初の文字列をタイトルとして扱う
     title = lines[0]
 
-    # 数字を取得
     nums = re.findall(r"\d+", text)
 
     return {
         "title": title,
-        "like": int(nums[0]) if len(nums) >= 1 else 0,
-        "views": int(nums[1]) if len(nums) >= 2 else 0
+        "like": int(nums[0]) if len(nums) > 0 else 0,
+        "views": int(nums[1]) if len(nums) > 1 else 0
     }
 
 
@@ -40,20 +35,11 @@ def scrape_posts():
     with sync_playwright() as p:
 
         browser = p.chromium.launch(headless=True)
-
         page = browser.new_page()
 
-        print("ページを開いています...")
-
-        page.goto(
-            URL,
-            wait_until="domcontentloaded",
-            timeout=60000
-        )
-
+        page.goto(URL, wait_until="domcontentloaded")
         page.wait_for_timeout(8000)
 
-        # プロフィール内のカードを探す
         container = page.locator(
             "div.bubble-element.Group.baTcwaH1"
         ).first
@@ -66,26 +52,16 @@ def scrape_posts():
 
         print("cards:", len(cards))
 
-        for i, card in enumerate(cards):
-
+        for card in cards:
             try:
-
                 text = card.inner_text()
-
-                print(f"\n--- CARD {i + 1} ---")
-                print(text)
-
                 parsed = parse_card(text)
 
                 if parsed:
                     results.append(parsed)
 
             except Exception as e:
-
-                print(
-                    f"CARD {i + 1} error:",
-                    e
-                )
+                print("error:", e)
 
         browser.close()
 
@@ -102,22 +78,13 @@ if __name__ == "__main__":
         "posts": posts
     }
 
-    print("\n====================")
     print("SCRAPED COUNT:", len(posts))
     print("UPDATED:", data["last_updated"])
-    print("====================")
 
-    with open(
-        "data.json",
-        "w",
-        encoding="utf-8"
-    ) as f:
-
+    with open("data.json", "w", encoding="utf-8") as f:
         json.dump(
             data,
             f,
             ensure_ascii=False,
             indent=2
         )
-
-    print("data.json を保存しました")
