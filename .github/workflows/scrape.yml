@@ -3,7 +3,7 @@ name: Scrape ChanPro
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/500 * * * *'
+    - cron: '0 */20 * * *'
 
 permissions:
   contents: write
